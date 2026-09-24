@@ -1298,9 +1298,9 @@ func (bc *batchController) recordAndBackoff(rows int, latency time.Duration) tim
 func (ing *Ingester) resolvePosition(ctx context.Context) (startLedger uint32, cursor string, err error) {
 	if !ing.startOverrideApplied && ing.opts.StartLedger > 0 {
 		ing.startOverrideApplied = true // Apply override exactly once on startup
-		health, err := ing.client.GetHealth(ctx)
-		if err != nil {
-			return 0, "", fmt.Errorf("getHealth for override: %w", err)
+		health, hErr := ing.client.GetHealth(ctx)
+		if hErr != nil {
+			return 0, "", fmt.Errorf("getHealth for override: %w", hErr)
 		}
 		if health.OldestLedger > 0 && ing.opts.StartLedger < health.OldestLedger {
 			return 0, "", fmt.Errorf(
