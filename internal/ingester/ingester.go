@@ -30,6 +30,9 @@ type Options struct {
 	RetentionLedgers uint32
 	// PageLimit is the getEvents pagination limit per request. Default 1000.
 	PageLimit uint
+	// MaxRetries bounds consecutive retries before resetting the backoff window.
+	// Default 0 (disabled).
+	MaxRetries int
 	// MaxBackoff caps the error backoff. Default 1m.
 	MaxBackoff time.Duration
 	// SweepWindow bounds the ledger range scanned per pass when the watched
@@ -212,6 +215,7 @@ type DeadLetterSink interface {
 // the store, so a tranquil Ctrl-C / SIGTERM never truncates a write.
 func (ing *Ingester) Run(ctx context.Context) error {
 	backoff := time.Second
+	retries := 0
 	lastReorgRescanAt := time.Time{}
 	for {
 		caughtUp, err := ing.runOnce(ctx)
@@ -219,6 +223,11 @@ func (ing *Ingester) Run(ctx context.Context) error {
 		case ctx.Err() != nil:
 			return ctx.Err()
 		case err != nil:
+			if ing.opts.MaxRetries > 0 && retries >= ing.opts.MaxRetries {
+				retries = 0
+				backoff = time.Second
+			}
+			retries++
 			// Lag alarm runs BEFORE the backoff so a stuck indexer
 			// doesn't wait out MaxBackoff before the operator sees
 			// it.
@@ -238,6 +247,7 @@ func (ing *Ingester) Run(ctx context.Context) error {
 			// on the cycle that noticed the gap, not PollInterval
 			// later.
 			ing.checkLag(ctx)
+			retries = 0
 			backoff = time.Second
 			if caughtUp {
 				if !sleepCtx(ctx, ing.opts.PollInterval) {
@@ -872,7 +882,7 @@ func (ing *Ingester) toStoreEvent(re rpc.Event) (store.Event, error) {
 
 // sleepCtx sleeps for d or until ctx is done; it reports whether the full
 // sleep completed.
-func sleepCtx(ctx context.Context, d time.Duration) bool {
+var sleepCtx = func(ctx context.Context, d time.Duration) bool {
 	timer := time.NewTimer(d)
 	defer timer.Stop()
 	select {
