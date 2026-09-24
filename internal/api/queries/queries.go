@@ -28,23 +28,24 @@ import (
 // from "explicitly set to the zero value" (REST treats absent as absent;
 // GraphQL has nil semantics naturally).
 type EventFilterArgs struct {
-	ContractID    string
-	Types         []string
-	Topic         json.RawMessage
-	T0            json.RawMessage
-	T1            json.RawMessage
-	T2            json.RawMessage
-	T3            json.RawMessage
-	TopicContains json.RawMessage
-	TxHash        string
-	FromLedger    int64
-	ToLedger      int64
-	FromTime      time.Time
-	ToTime        time.Time
-	Order         string
-	OrderBy       string
-	Cursor        string
-	Limit         int
+	ContractID       string
+	ContractIDPrefix string
+	Types            []string
+	Topic            json.RawMessage
+	T0               json.RawMessage
+	T1               json.RawMessage
+	T2               json.RawMessage
+	T3               json.RawMessage
+	TopicContains    json.RawMessage
+	TxHash           string
+	FromLedger       int64
+	ToLedger         int64
+	FromTime         time.Time
+	ToTime           time.Time
+	Order            string
+	OrderBy          string
+	Cursor           string
+	Limit            int
 }
 
 // PageArgs is the wire-agnostic pagination descriptor both REST and
@@ -94,27 +95,31 @@ type CursorProbe struct {
 // [1, MaxPageSize] produce a validation error.
 func BuildEventFilter(args EventFilterArgs) (store.EventFilter, error) {
 	f := store.EventFilter{
-		ContractID:    args.ContractID,
-		Types:         args.Types,
-		Topic:         args.Topic,
-		Topic0:        args.T0,
-		Topic1:        args.T1,
-		Topic2:        args.T2,
-		Topic3:        args.T3,
-		TopicContains: args.TopicContains,
-		TxHash:        args.TxHash,
-		FromLedger:    args.FromLedger,
-		ToLedger:      args.ToLedger,
-		FromTime:      args.FromTime,
-		ToTime:        args.ToTime,
-		Order:         args.Order,
-		OrderBy:       args.OrderBy,
-		Cursor:        args.Cursor,
-		Limit:         args.Limit,
+		ContractID:       args.ContractID,
+		ContractIDPrefix: args.ContractIDPrefix,
+		Types:            args.Types,
+		Topic:            args.Topic,
+		Topic0:           args.T0,
+		Topic1:           args.T1,
+		Topic2:           args.T2,
+		Topic3:           args.T3,
+		TopicContains:    args.TopicContains,
+		TxHash:           args.TxHash,
+		FromLedger:       args.FromLedger,
+		ToLedger:         args.ToLedger,
+		FromTime:         args.FromTime,
+		ToTime:           args.ToTime,
+		Order:            args.Order,
+		OrderBy:          args.OrderBy,
+		Cursor:           args.Cursor,
+		Limit:            args.Limit,
 	}
 
 	if f.ContractID != "" && !config.ValidContractID(f.ContractID) {
 		return f, fmt.Errorf("invalid contract_id %q", f.ContractID)
+	}
+	if f.ContractIDPrefix != "" && f.ContractID != "" {
+		return f, errors.New("contract_id and contract_id_prefix cannot be combined")
 	}
 	if f.Cursor != "" && !config.ValidCursor(f.Cursor) {
 		return f, fmt.Errorf("invalid cursor %q", f.Cursor)
@@ -231,14 +236,39 @@ func ParseTopic(raw string) (json.RawMessage, error) {
 	if raw == "" {
 		return nil, nil
 	}
-	if json.Valid([]byte(raw)) {
-		return json.RawMessage(raw), nil
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return nil, nil
 	}
-	quoted, err := json.Marshal(raw)
+	if json.Valid([]byte(trimmed)) {
+		return json.RawMessage(trimmed), nil
+	}
+	if looksLikeJSON(trimmed) {
+		return nil, errors.New("topic must be valid JSON")
+	}
+	quoted, err := json.Marshal(trimmed)
 	if err != nil {
 		return nil, fmt.Errorf("invalid json: %w", err)
 	}
 	return quoted, nil
+}
+
+func looksLikeJSON(s string) bool {
+	if s == "" {
+		return false
+	}
+	switch s[0] {
+	case '{', '[', '"', '-', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9':
+		return true
+	case 't':
+		return s == "true"
+	case 'f':
+		return s == "false"
+	case 'n':
+		return s == "null"
+	default:
+		return false
+	}
 }
 
 // ParseTopicContains requires a JSON value (no auto-quoting). Used by

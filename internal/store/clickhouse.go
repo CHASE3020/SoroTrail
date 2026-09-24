@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/url"
 	"strconv"
 	"strings"
@@ -12,7 +13,13 @@ import (
 // ClickHouse implements Store with clickhouse-go/v2.
 // It is intentionally minimal for now and is wired through the same
 // interface so the app can select it via DATABASE_URL.
-type ClickHouse struct{}
+//
+// contributors: Ping performs a real TCP dial to the server so the
+// readiness probe cannot report healthy against an unreachable database.
+type ClickHouse struct {
+	host string
+	port int
+}
 
 var _ Store = (*ClickHouse)(nil)
 
@@ -23,6 +30,31 @@ type clickHouseConfig struct {
 	password string
 	database string
 	ssl      bool
+}
+
+// Contract metadata (token enrichment) is Postgres-only; the ClickHouse
+// backend reports "not found"/empty so the enrichment worker stays a no-op.
+func (c *ClickHouse) ListContractIDs(context.Context) ([]string, error) { return nil, nil }
+func (c *ClickHouse) GetContractMeta(context.Context, string) (ContractMeta, error) {
+	return ContractMeta{}, ErrNotFound
+}
+func (c *ClickHouse) UpsertContractMeta(context.Context, ContractMeta) error     { return nil }
+func (c *ClickHouse) CountContractEvents(context.Context, string) (int64, error) { return 0, nil }
+
+// GetContractSummary returns a single contract's summary from ClickHouse.
+func (c *ClickHouse) GetContractSummary(ctx context.Context, contractID string) (ContractSummary, error) {
+	// TODO: implement ClickHouse-specific query
+	return ContractSummary{}, fmt.Errorf("GetContractSummary: not yet implemented for ClickHouse")
+}
+
+// ContractEventTypeCounts returns per-type event counts from ClickHouse.
+func (c *ClickHouse) ContractEventTypeCounts(ctx context.Context, contractID string) ([]ContractEventTypeCount, error) {
+	// TODO: implement ClickHouse-specific query
+	return nil, fmt.Errorf("ContractEventTypeCounts: not yet implemented for ClickHouse")
+}
+
+func (c *ClickHouse) ListContractsNeedingRefresh(context.Context, time.Time) ([]string, error) {
+	return nil, nil
 }
 
 func parseClickHouseConfig(raw string) (clickHouseConfig, error) {
@@ -59,11 +91,11 @@ func parseClickHouseConfig(raw string) (clickHouseConfig, error) {
 
 func NewStoreFromURL(databaseURL string) (Store, error) {
 	if strings.HasPrefix(databaseURL, "clickhouse://") {
-		_, err := parseClickHouseConfig(databaseURL)
+		cfg, err := parseClickHouseConfig(databaseURL)
 		if err != nil {
 			return nil, err
 		}
-		return &ClickHouse{}, nil
+		return &ClickHouse{host: cfg.host, port: cfg.port}, nil
 	}
 	if strings.HasPrefix(databaseURL, "postgres://") || strings.HasPrefix(databaseURL, "postgresql://") {
 		return &Postgres{}, nil
@@ -103,6 +135,10 @@ func (c *ClickHouse) LedgerRangeCensus(ctx context.Context, fromLedger, toLedger
 	return nil, nil
 }
 
+func (c *ClickHouse) AggregateEvents(ctx context.Context, f EventFilter, bucket string) ([]AggregateBucket, error) {
+	return nil, nil
+}
+
 func (c *ClickHouse) GetIngestionState(ctx context.Context) (IngestionState, error) {
 	return IngestionState{}, nil
 }
@@ -111,7 +147,7 @@ func (c *ClickHouse) SaveIngestionState(ctx context.Context, s IngestionState) e
 	return nil
 }
 
-func (c *ClickHouse) GetAuditState(ctx context.Context) (AuditState, error) {
+func (c *ClickHouse) GetAuditState(ctx context.Context, network string) (AuditState, error) {
 	return AuditState{}, nil
 }
 
@@ -119,7 +155,7 @@ func (c *ClickHouse) SaveAuditState(ctx context.Context, s AuditState) error {
 	return nil
 }
 
-func (c *ClickHouse) SaveAuditStateIfGreater(ctx context.Context, ledger int64) (AuditState, error) {
+func (c *ClickHouse) SaveAuditStateIfGreater(ctx context.Context, network string, ledger int64) (AuditState, error) {
 	return AuditState{}, nil
 }
 
@@ -135,6 +171,22 @@ func (c *ClickHouse) AddWatchedContract(ctx context.Context, contractID string) 
 	return nil
 }
 
+func (c *ClickHouse) GetContractCursor(context.Context, string) (ContractCursor, error) {
+	return ContractCursor{}, ErrNotFound
+}
+
+func (c *ClickHouse) SaveContractCursor(context.Context, ContractCursor) error {
+	return nil
+}
+
+func (c *ClickHouse) DeleteContractCursor(context.Context, string) error {
+	return nil
+}
+
+func (c *ClickHouse) ListContractCursors(context.Context) ([]ContractCursor, error) {
+	return nil, nil
+}
+
 func (c *ClickHouse) RecordAuditFinding(ctx context.Context, f AuditFinding) (AuditFinding, error) {
 	return f, nil
 }
@@ -143,7 +195,7 @@ func (c *ClickHouse) UpdateAuditFinding(ctx context.Context, f AuditFinding) err
 	return nil
 }
 
-func (c *ClickHouse) ListOpenFindingsByRange(ctx context.Context, fromLedger, toLedger int64) (AuditFinding, error) {
+func (c *ClickHouse) ListOpenFindingsByRange(ctx context.Context, network string, fromLedger, toLedger int64) (AuditFinding, error) {
 	return AuditFinding{}, ErrNotFound
 }
 
@@ -187,11 +239,27 @@ func (c *ClickHouse) ListDeliveryAttempts(ctx context.Context, subscriptionID in
 	return nil, nil
 }
 
+func (c *ClickHouse) CountDeliveryAttempts(ctx context.Context, subscriptionID int64, owner SubscriptionOwner) (int64, error) {
+	return 0, nil
+}
+
 func (c *ClickHouse) GetContractSpec(ctx context.Context, wasmHash string) ([]byte, error) {
 	return nil, ErrNotFound
 }
 
 func (c *ClickHouse) SetContractSpec(ctx context.Context, wasmHash, contractID string, specJSON []byte) error {
+	return nil
+}
+
+func (c *ClickHouse) GetContractSpecOverride(ctx context.Context, contractID string) ([]byte, error) {
+	return nil, ErrNotFound
+}
+
+func (c *ClickHouse) SetContractSpecOverride(ctx context.Context, contractID string, specJSON []byte) error {
+	return nil
+}
+
+func (c *ClickHouse) DeleteContractSpecOverride(ctx context.Context, contractID string) error {
 	return nil
 }
 
@@ -215,9 +283,37 @@ func (c *ClickHouse) CountContracts(context.Context, ContractsFilter) (int64, er
 	return 0, nil
 }
 
+// API keys are not implemented for the ClickHouse backend: it is used as a
+// read-side analytics mirror behind the Postgres-backed API, which owns
+// authentication.
+func (c *ClickHouse) CreateAPIKey(context.Context, APIKey) (APIKey, error) {
+	return APIKey{}, fmt.Errorf("CreateAPIKey: not supported by the clickhouse backend")
+}
+
+func (c *ClickHouse) GetAPIKey(context.Context, int64) (APIKey, error) {
+	return APIKey{}, fmt.Errorf("GetAPIKey: not supported by the clickhouse backend")
+}
+
+func (c *ClickHouse) LookupAPIKeyByPrefix(context.Context, string) (APIKey, error) {
+	return APIKey{}, fmt.Errorf("LookupAPIKeyByPrefix: not supported by the clickhouse backend")
+}
+
+func (c *ClickHouse) ListAPIKeys(context.Context) ([]APIKey, error) {
+	return nil, fmt.Errorf("ListAPIKeys: not supported by the clickhouse backend")
+}
+
+func (c *ClickHouse) RevokeAPIKey(context.Context, int64) error {
+	return fmt.Errorf("RevokeAPIKey: not supported by the clickhouse backend")
+}
+
 // DeleteEventsBefore is a stub: retention pruning is not implemented for
 // the ClickHouse backend yet.
 func (c *ClickHouse) DeleteEventsBefore(context.Context, int64, time.Time, int) (int64, error) {
+	return 0, nil
+}
+
+// CountEventsBefore is a stub: dry-run pruning is not implemented for the ClickHouse backend.
+func (c *ClickHouse) CountEventsBefore(context.Context, int64, time.Time, int) (int64, error) {
 	return 0, nil
 }
 
@@ -229,6 +325,10 @@ func (c *ClickHouse) ListDeadLetters(context.Context, string, int, string) ([]De
 	return nil, "", nil
 }
 
+func (c *ClickHouse) CountDeadLetters(context.Context, string) (int64, error) {
+	return 0, nil
+}
+
 func (c *ClickHouse) GetDeadLetter(context.Context, int64) (DeadLetter, error) {
 	return DeadLetter{}, ErrNotFound
 }
@@ -238,5 +338,30 @@ func (c *ClickHouse) DeleteDeadLetter(context.Context, int64) error {
 }
 
 func (c *ClickHouse) Ping(ctx context.Context) error {
+	if c.host == "" {
+		return fmt.Errorf("clickhouse: not configured (empty host)")
+	}
+	addr := net.JoinHostPort(c.host, strconv.Itoa(c.port))
+	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", addr)
+	if err != nil {
+		return fmt.Errorf("clickhouse ping %s: %w", addr, err)
+	}
+	conn.Close()
 	return nil
+}
+
+func (c *ClickHouse) UpsertAddressRefs(ctx context.Context, refs []AddressRef) error {
+	return nil
+}
+
+func (c *ClickHouse) QueryAddressEvents(ctx context.Context, address string, f EventFilter) ([]Event, string, error) {
+	return nil, "", nil
+}
+
+func (c *ClickHouse) CountAddressEvents(ctx context.Context, address string) (int64, error) {
+	return 0, nil
+}
+
+func (c *ClickHouse) GetAddressSummary(ctx context.Context, address string) (AddressSummary, error) {
+	return AddressSummary{}, nil
 }
