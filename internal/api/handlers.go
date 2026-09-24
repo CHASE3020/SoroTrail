@@ -29,11 +29,13 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/go-chi/chi/v5"
+	dto "github.com/prometheus/client_model/go"
 
 	"github.com/sorotrail/sorotrail/internal/api/queries"
 	"github.com/sorotrail/sorotrail/internal/broadcast"
 	"github.com/sorotrail/sorotrail/internal/buildinfo"
 	"github.com/sorotrail/sorotrail/internal/config"
+	"github.com/sorotrail/sorotrail/internal/metrics"
 	"github.com/sorotrail/sorotrail/internal/store"
 )
 
@@ -1681,6 +1683,16 @@ func (s *Server) assembleStats(ctx context.Context) (store.Stats, error) {
 	}
 
 	stats.PanicsRecovered = s.recoverer.PanicsRecovered()
+
+	// EventsIngestedTotal mirrors the sorotrail_events_ingested_total
+	// Prometheus counter, read via Write rather than a second counter so
+	// /stats and /metrics can never drift apart. The counter (and so this
+	// field) is cumulative since process start, not all-time: it resets
+	// across restarts along with every other in-memory counter here.
+	var ingestedMetric dto.Metric
+	if err := metrics.EventsIngested.Write(&ingestedMetric); err == nil {
+		stats.EventsIngestedTotal = uint64(ingestedMetric.GetCounter().GetValue())
+	}
 
 	if a := getAuditor(); a != nil {
 

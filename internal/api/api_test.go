@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel"
@@ -25,6 +26,7 @@ import (
 	"github.com/sorotrail/sorotrail/internal/buildinfo"
 	"github.com/sorotrail/sorotrail/internal/decode"
 	"github.com/sorotrail/sorotrail/internal/ingester"
+	"github.com/sorotrail/sorotrail/internal/metrics"
 	"github.com/sorotrail/sorotrail/internal/rpc"
 	"github.com/sorotrail/sorotrail/internal/store"
 )
@@ -1648,6 +1650,25 @@ func TestStats_IngesterEffectivePollInterval(t *testing.T) {
 		require.NoError(t, json.Unmarshal(body, &got))
 		assert.Equal(t, int64(5000), got.Ingester.EffectivePollIntervalMs)
 	})
+}
+
+// TestStats_EventsIngestedTotal covers issue #536: /stats must surface the
+// cumulative count of events the ingester has persisted, read from the
+// Prometheus counter metrics.EventsIngested, rather than permanently
+// reporting zero.
+func TestStats_EventsIngestedTotal(t *testing.T) {
+	before := testutil.ToFloat64(metrics.EventsIngested)
+	metrics.EventsIngested.Add(7)
+
+	st := &stubStore{}
+	rc := &stubRPC{health: rpc.Health{Status: "healthy"}}
+
+	resp, body := doGet(t, newTestServer(st, rc), "/stats")
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	var got store.Stats
+	require.NoError(t, json.Unmarshal(body, &got))
+	assert.Equal(t, uint64(before)+7, got.EventsIngestedTotal,
+		"events_ingested_total must reflect the live Prometheus counter, not stay at zero")
 }
 
 // TestStats_Cache verifies the /stats TTL cache end-to-end: repeated calls

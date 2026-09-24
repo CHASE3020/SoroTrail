@@ -688,8 +688,9 @@ type Stats struct {
 	// directly or when no errors have occurred.
 	QueryErrors uint64 `json:"query_errors"`
 	// EventsIngestedTotal is the total number of events successfully
-	// persisted to the store since process start. Populated by the
-	// ingester; zero when the ingester is not wired.
+	// persisted to the store since process start, read from the
+	// sorotrail_events_ingested_total Prometheus counter. It resets across
+	// restarts, same as every other in-memory counter in this struct.
 	EventsIngestedTotal uint64 `json:"events_ingested_total"`
 	// PanicsRecovered is the number of panics the HTTP middleware has
 	// recovered since process start. Set by the API handler.
