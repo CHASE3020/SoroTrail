@@ -115,6 +115,9 @@ type Options struct {
 	RetentionLedgers uint32
 	// PageLimit is the getEvents pagination limit per request. Default 1000.
 	PageLimit uint
+	// MaxRetries bounds consecutive retries before resetting the backoff window.
+	// Default 0 (disabled).
+	MaxRetries int
 	// WriteBatchSize is the maximum number of events written in one store
 	// operation. Default 1000.
 	WriteBatchSize uint
@@ -520,11 +523,6 @@ func (ing *Ingester) backoffSleep(backoff time.Duration) time.Duration {
 // resumes from there with idempotent upserts covering any half-done
 // batch. There is no place in the loop where a partial state lands in
 // the store, so a tranquil Ctrl-C / SIGTERM never truncates a write.
-// Startup/shutdown logging: Run emits one "ingester started" line carrying
-// the effective (post-defaults) configuration, and one "ingester stopped"
-// line on every exit path — clean cancellation, RPC failure backoff exit,
-// or error return — so an operator correlating logs can see exactly when
-// the loop was live and with what knobs, without grepping config dumps.
 func (ing *Ingester) Run(ctx context.Context) (err error) {
 	ing.log.Info("ingester started", ing.opts.logAttrs()...)
 	defer func() {
@@ -536,6 +534,7 @@ func (ing *Ingester) Run(ctx context.Context) (err error) {
 	}()
 
 	backoff := ing.opts.MinBackoff
+	retries := 0
 	lastReorgRescanAt := time.Time{}
 	for {
 		caughtUp, err := ing.runOnce(ctx)
@@ -543,6 +542,11 @@ func (ing *Ingester) Run(ctx context.Context) (err error) {
 		case ctx.Err() != nil:
 			return ctx.Err()
 		case err != nil:
+			if ing.opts.MaxRetries > 0 && retries >= ing.opts.MaxRetries {
+				retries = 0
+				backoff = ing.opts.MinBackoff
+			}
+			retries++
 			// Lag alarm runs BEFORE the backoff so a stuck indexer
 			// doesn't wait out MaxBackoff before the operator sees
 			// it.
@@ -562,6 +566,7 @@ func (ing *Ingester) Run(ctx context.Context) (err error) {
 			// on the cycle that noticed the gap, not PollInterval
 			// later.
 			ing.checkLag(ctx)
+			retries = 0
 			backoff = ing.opts.MinBackoff
 			if caughtUp {
 				// PollInterval (not opts.PollInterval) so a live update via
@@ -1643,8 +1648,6 @@ func clampDuration(d, min, max time.Duration) time.Duration {
 	return d
 }
 
-// sleepCtx sleeps for d or until ctx is done; it reports whether the full
-// sleep completed.
 // indexEventAddresses extracts G.../C... addresses from each event's
 // decoded topics and value JSON, then persists them to the event_addresses
 // inverted index. Extraction is a best-effort derived index: errors are
