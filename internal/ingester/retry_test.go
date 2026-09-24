@@ -15,6 +15,7 @@ type retryTestClock struct {
 	sleeps []time.Duration
 	cancel context.CancelFunc
 }
+
 func (c *retryTestClock) Now() time.Time { return time.Now() }
 func (c *retryTestClock) SleepCtx(ctx context.Context, d time.Duration) bool {
 	if d == 10*time.Millisecond {
