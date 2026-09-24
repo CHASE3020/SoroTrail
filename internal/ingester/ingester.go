@@ -334,6 +334,7 @@ type Ingester struct {
 	decoder decode.Decoder
 	log     *slog.Logger
 	opts    Options
+	startOverrideApplied bool
 	// tracer emits OpenTelemetry spans around each ingest cycle. It is
 	// always non-nil (noop by default) so call sites never need a guard.
 	tracer trace.Tracer
@@ -1295,11 +1296,19 @@ func (bc *batchController) recordAndBackoff(rows int, latency time.Duration) tim
 }
 
 func (ing *Ingester) resolvePosition(ctx context.Context) (startLedger uint32, cursor string, err error) {
-	if ing.opts.StartLedger > 0 {
-		start := ing.opts.StartLedger
-		ing.opts.StartLedger = 0 // Apply override exactly once on startup
-		ing.log.Info("resume override via config", "start_ledger", start)
-		return start, "", nil
+	if !ing.startOverrideApplied && ing.opts.StartLedger > 0 {
+		ing.startOverrideApplied = true // Apply override exactly once on startup
+		health, err := ing.client.GetHealth(ctx)
+		if err != nil {
+			return 0, "", fmt.Errorf("getHealth for override: %w", err)
+		}
+		if health.OldestLedger > 0 && ing.opts.StartLedger < health.OldestLedger {
+			return 0, "", fmt.Errorf(
+				"START_LEDGER %d is below the RPC's oldest retained ledger %d; events in the gap are unrecoverable",
+				ing.opts.StartLedger, health.OldestLedger)
+		}
+		ing.log.Info("resume override via config", "start_ledger", ing.opts.StartLedger)
+		return ing.opts.StartLedger, "", nil
 	}
 
 	state, err := ing.getIngestionState(ctx)
