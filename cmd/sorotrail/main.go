@@ -79,12 +79,21 @@ func dispatch(args []string) error {
 			os.Exit(code)
 		}
 		return nil
+	case "health":
+		// Like healthcheck, manages its own exit codes (0 healthy,
+		// 1 unhealthy, 2 usage) so external probes — k8s liveness,
+		// load balancers, CI gates — read the outcome directly.
+		code := runHealth(args[1:])
+		if code != 0 {
+			os.Exit(code)
+		}
+		return nil
 	case "schema-inspect":
 		return runSchemaInspect(args[1:])
 	case "migrate-status":
 		return runMigrateStatus(args[1:])
-	case "stats":
-		return runStats(args[1:])
+	case "completion":
+		return runCompletion(args[1:])
 	case "help", "-h", "--help":
 		usage()
 		return nil
@@ -108,14 +117,16 @@ subcommands:
                    (sorotrail backfill --help)
   index-addresses  rebuild the address→event inverted index from stored events
                    (sorotrail index-addresses --help)
+  health           probe the API /health and exit nonzero on failure
+                   (sorotrail health --help)
   healthcheck      probe /health and exit (used by docker HEALTHCHECK)
                    (sorotrail healthcheck --help)
   schema-inspect   report migration state, partitions, and table sizes
                    (sorotrail schema-inspect --help)
   migrate-status   report pending migrations without applying them
                    (sorotrail migrate-status --help)
-  stats            print store stats as a table
-                   (sorotrail stats --help)
+  completion       print a shell completion script (bash, zsh, fish)
+                   (sorotrail completion --help)
 `)
 }
 
