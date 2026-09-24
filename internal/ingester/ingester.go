@@ -544,7 +544,7 @@ func (ing *Ingester) Run(ctx context.Context) (err error) {
 		case err != nil:
 			if ing.opts.MaxRetries > 0 && retries >= ing.opts.MaxRetries {
 				retries = 0
-				backoff = time.Second
+				backoff = ing.opts.MinBackoff
 			}
 			retries++
 			// Lag alarm runs BEFORE the backoff so a stuck indexer
