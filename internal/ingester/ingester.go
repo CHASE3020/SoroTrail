@@ -329,11 +329,11 @@ type EventNotifier interface {
 
 // Ingester pages events out of the RPC and into the store.
 type Ingester struct {
-	client  rpc.Client
-	store   store.Store
-	decoder decode.Decoder
-	log     *slog.Logger
-	opts    Options
+	client               rpc.Client
+	store                store.Store
+	decoder              decode.Decoder
+	log                  *slog.Logger
+	opts                 Options
 	startOverrideApplied bool
 	// tracer emits OpenTelemetry spans around each ingest cycle. It is
 	// always non-nil (noop by default) so call sites never need a guard.
