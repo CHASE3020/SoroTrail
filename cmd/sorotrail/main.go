@@ -83,6 +83,8 @@ func dispatch(args []string) error {
 		return runSchemaInspect(args[1:])
 	case "migrate-status":
 		return runMigrateStatus(args[1:])
+	case "stats":
+		return runStats(args[1:])
 	case "help", "-h", "--help":
 		usage()
 		return nil
@@ -112,6 +114,8 @@ subcommands:
                    (sorotrail schema-inspect --help)
   migrate-status   report pending migrations without applying them
                    (sorotrail migrate-status --help)
+  stats            print store stats as a table
+                   (sorotrail stats --help)
 `)
 }
 
