@@ -761,6 +761,56 @@ Shell
 | `order_by` | `created_at` | `id` \| `ledger` \| `created_at`, defaults to `id`. Sort column. Anything else is a `400`. |
 | `decoded` | `true` | `true` \| `false`. `true` enriches events with spec-driven named fields; contracts without a spec return flagged raw data with `"decoded": false`. `false` is the opt-out — see [Opting out of decoding](#opting-out-of-decoding). |
 
+#### Filter examples
+
+Every parameter in the table above is a query parameter on the same
+endpoint, so each filter is one copy-paste `curl` away. Replace the
+placeholder values (contract ID, hashes, addresses) with real ones.
+
+```sh
+# Contract: a single ID (a comma-separated list matches several at once)
+curl -s 'localhost:8080/events?contract_id=CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC&limit=5'
+
+# Event type: contract | system | diagnostic
+curl -s 'localhost:8080/events?type=contract&limit=5'
+
+# Only events from successful (true) or failed (false) calls
+curl -s 'localhost:8080/events?in_successful_call=true&limit=5'
+
+# Topic: exact match against any position
+curl -s 'localhost:8080/events?topic={"symbol":"transfer"}&limit=5'
+
+# Topic containment: events whose topics include an address
+curl -s 'localhost:8080/events?topic_contains=[{"address":"GA...5WI"}]&limit=5'
+
+# Position-specific topics: topic0..topic3
+curl -s 'localhost:8080/events?topic0={"symbol":"transfer"}&limit=5'
+curl -s 'localhost:8080/events?topic1={"address":"GABC..."}&limit=5'
+curl -s 'localhost:8080/events?topic2={"address":"GDEF..."}&limit=5'
+curl -s 'localhost:8080/events?topic3={"u64":7}&limit=5'
+
+# Transaction hash
+curl -s 'localhost:8080/events?tx_hash=9f5c7a2b...&limit=5'
+
+# Ledger range (inclusive on both ends)
+curl -s 'localhost:8080/events?from_ledger=250000&to_ledger=260000'
+
+# created_at range (RFC 3339, inclusive on both ends)
+curl -s 'localhost:8080/events?from_time=2026-07-21T00:00:00Z&to_time=2026-07-22T00:00:00Z'
+
+# Page size, then the next page via the cursor from the previous response
+curl -s 'localhost:8080/events?limit=50'
+curl -s 'localhost:8080/events?cursor=0001099511627776-0000000009&limit=50'
+
+# Sort direction and sort column
+curl -s 'localhost:8080/events?order=desc&limit=50'
+curl -s 'localhost:8080/events?order_by=created_at&order=desc&limit=50'
+
+# Rendering: skip spec enrichment, or include the raw base64 XDR
+curl -s 'localhost:8080/events?decoded=false&limit=5'
+curl -s 'localhost:8080/events?include_xdr=true&limit=5'
+```
+
 #### Opting out of decoding
 
 `?decoded=false` returns the stored event columns exactly as they are. No
