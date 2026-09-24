@@ -657,6 +657,13 @@ func (ing *Ingester) persistEvents(ctx context.Context, rpcEvents []rpc.Event, l
 // (mid-pagination), the ledger after the last ingested one (warm start), or
 // latest-minus-retention (cold start).
 func (ing *Ingester) resolvePosition(ctx context.Context) (startLedger uint32, cursor string, err error) {
+	if ing.opts.StartLedger > 0 {
+		start := ing.opts.StartLedger
+		ing.opts.StartLedger = 0 // Apply override exactly once on startup
+		ing.log.Info("resume override via config", "start_ledger", start)
+		return start, "", nil
+	}
+
 	state, err := ing.store.GetIngestionState(ctx)
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		return 0, "", err
@@ -669,9 +676,6 @@ func (ing *Ingester) resolvePosition(ctx context.Context) (startLedger uint32, c
 	}
 
 	// Cold start.
-	if ing.opts.StartLedger > 0 {
-		return ing.opts.StartLedger, "", nil
-	}
 	health, err := ing.client.GetHealth(ctx)
 	if err != nil {
 		return 0, "", fmt.Errorf("getHealth for cold start: %w", err)
